@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+input_*.lua
+output_*.lua
