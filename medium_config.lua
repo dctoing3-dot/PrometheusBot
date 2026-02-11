@@ -5,8 +5,6 @@ return {
     PrettyPrint = false;
     Seed = 12345;
     
-    Minify = true;
-    
     Steps = {
         {Name = "EncryptStrings"; Settings = {};};
         {Name = "Vmify"; Settings = {};};

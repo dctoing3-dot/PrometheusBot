@@ -3,7 +3,6 @@ from discord.ext import commands
 import subprocess
 import os
 import asyncio
-import re
 from flask import Flask
 from threading import Thread
 
@@ -19,47 +18,18 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
-def aggressive_minify(code):
-    """Minify Lua code ke 1 baris padat"""
+def safe_oneline(code):
+    """Ubah ke 1 baris dengan AMAN - hanya hapus newline, jaga spasi"""
+    # Hanya ganti newline jadi spasi (AMAN)
+    code = code.replace('\n', ' ')
+    code = code.replace('\r', '')
     
-    # 1. Hapus komentar multi-line --[[ ]]
-    code = re.sub(r'--\[\[.*?\]\]', '', code, flags=re.DOTALL)
+    # Hapus multiple spaces jadi 1 spasi (AMAN)
+    import re
+    code = re.sub(r' +', ' ', code)
     
-    # 2. Hapus komentar single-line --
-    code = re.sub(r'--[^\n]*', '', code)
-    
-    # 3. Ganti semua whitespace (newline, tab, spasi ganda) jadi 1 spasi
-    code = re.sub(r'\s+', ' ', code)
-    
-    # 4. Hapus spasi di sekitar operator dan tanda baca
-    # Sebelum dan sesudah: { } [ ] ( ) = , ; + - * / % ^ # < > ~
-    code = re.sub(r'\s*(\{)\s*', r'\1', code)
-    code = re.sub(r'\s*(\})\s*', r'\1', code)
-    code = re.sub(r'\s*(\[)\s*', r'\1', code)
-    code = re.sub(r'\s*(\])\s*', r'\1', code)
-    code = re.sub(r'\s*(\()\s*', r'\1', code)
-    code = re.sub(r'\s*(\))\s*', r'\1', code)
-    code = re.sub(r'\s*(=)\s*', r'\1', code)
-    code = re.sub(r'\s*(,)\s*', r'\1', code)
-    code = re.sub(r'\s*(;)\s*', r'\1', code)
-    code = re.sub(r'\s*(\+)\s*', r'\1', code)
-    code = re.sub(r'\s*(-)\s*', r'\1', code)
-    code = re.sub(r'\s*(\*)\s*', r'\1', code)
-    code = re.sub(r'\s*(/)\s*', r'\1', code)
-    code = re.sub(r'\s*(%)\s*', r'\1', code)
-    code = re.sub(r'\s*(\^)\s*', r'\1', code)
-    code = re.sub(r'\s*(#)\s*', r'\1', code)
-    code = re.sub(r'\s*(\.\.)\s*', r'\1', code)
-    
-    # 5. Tapi JAGA spasi antara keyword dan identifier
-    # Contoh: "local m" TIDAK boleh jadi "localm"
-    # Ini sudah aman karena kita hanya hapus spasi di sekitar simbol
-    
-    # 6. Hapus spasi di awal dan akhir
+    # Hapus spasi di awal/akhir
     code = code.strip()
-    
-    # 7. Pastikan tidak ada newline tersisa
-    code = code.replace('\n', '').replace('\r', '')
     
     return code
 
@@ -82,17 +52,11 @@ async def obfuscate(ctx, mode: str = "1"):
     }
     
     if mode not in modes:
-        await ctx.send(
-            "❌ **Mode tidak valid!**\n\n"
-            "`!obf 0` → Minify\n"
-            "`!obf 1` → Light ⭐\n"
-            "`!obf 2` → Medium\n"
-            "`!obf 3` → Strong"
-        )
+        await ctx.send("❌ Mode: `0` `1` `2` `3`")
         return
     
     if not ctx.message.attachments:
-        await ctx.send("❌ Upload file `.lua` + ketik `!obf 1`")
+        await ctx.send("❌ Upload `.lua` + `!obf 1`")
         return
     
     attachment = ctx.message.attachments[0]
@@ -104,10 +68,7 @@ async def obfuscate(ctx, mode: str = "1"):
     file_kb = attachment.size / 1024
     
     if file_kb > max_kb:
-        await ctx.send(
-            f"❌ File {file_kb:.1f}KB > {max_kb}KB\n"
-            f"Coba `!obf 0` atau `!obf 1`"
-        )
+        await ctx.send(f"❌ {file_kb:.1f}KB > {max_kb}KB\nCoba `!obf 0` atau `!obf 1`")
         return
 
     msg = await ctx.send(f"🔄 `{attachment.filename}` [{mode_name}]...")
@@ -128,14 +89,12 @@ async def obfuscate(ctx, mode: str = "1"):
         await asyncio.wait_for(process.communicate(), timeout=timeout)
 
         if os.path.exists(output_file):
-            # Baca hasil
             with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
-            # MINIFY AGRESIF - 1 baris padat
-            content = aggressive_minify(content)
+            # AMAN: Hanya jadikan 1 baris, jaga spasi
+            content = safe_oneline(content)
             
-            # Tulis hasil akhir
             with open(final_file, 'w', encoding='utf-8') as f:
                 f.write(content)
             
@@ -155,7 +114,7 @@ async def obfuscate(ctx, mode: str = "1"):
     except asyncio.TimeoutError:
         await msg.edit(content="❌ Timeout!")
     except Exception as e:
-        await msg.edit(content=f"❌ Error: {e}")
+        await msg.edit(content=f"❌ {e}")
     finally:
         for f in [input_file, output_file, final_file]:
             if os.path.exists(f): os.remove(f)

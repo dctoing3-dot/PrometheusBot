@@ -2,11 +2,8 @@ return {
     LuaVersion = "Lua51";
     VarNamePrefix = "";
     NameGenerator = "MangledShuffled";
-    PrettyPrint = false;
+    PrettyPrint = false;  -- Ini sudah minify otomatis
     Seed = 12345;
-    
-    -- Pengaturan agar output padat
-    Minify = true;
     
     Steps = {
         {Name = "EncryptStrings"; Settings = {};};
