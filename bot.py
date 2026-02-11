@@ -3,6 +3,7 @@ from discord.ext import commands
 import subprocess
 import os
 import asyncio
+import re
 from flask import Flask
 from threading import Thread
 
@@ -17,6 +18,20 @@ def run_web():
 def keep_alive():
     t = Thread(target=run_web)
     t.start()
+
+def minify_lua(content):
+    """Hapus whitespace berlebih agar output 1 baris padat"""
+    # Hapus komentar single line
+    content = re.sub(r'--[^\n]*', '', content)
+    # Hapus komentar multi line
+    content = re.sub(r'--\[\[.*?\]\]', '', content, flags=re.DOTALL)
+    # Hapus newlines dan multiple spaces
+    content = re.sub(r'\s+', ' ', content)
+    # Hapus spasi setelah/sebelum karakter tertentu
+    content = re.sub(r'\s*([{}\[\]()=,;])\s*', r'\1', content)
+    # Hapus spasi di awal dan akhir
+    content = content.strip()
+    return content
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
 intents = discord.Intents.default()
@@ -39,16 +54,15 @@ async def obfuscate(ctx, mode: str = "1"):
     if mode not in modes:
         await ctx.send(
             "❌ **Mode tidak valid!**\n\n"
-            "**Pilih mode:**\n"
-            "`!obf 0` → Minify (tercepat)\n"
-            "`!obf 1` → Light ⭐ Recommended\n"
+            "`!obf 0` → Minify\n"
+            "`!obf 1` → Light ⭐\n"
             "`!obf 2` → Medium\n"
-            "`!obf 3` → Strong (file kecil saja)\n"
+            "`!obf 3` → Strong"
         )
         return
     
     if not ctx.message.attachments:
-        await ctx.send("❌ Upload file `.lua` lalu ketik `!obf 1`")
+        await ctx.send("❌ Upload file `.lua` + ketik `!obf 1`")
         return
     
     attachment = ctx.message.attachments[0]
@@ -61,17 +75,17 @@ async def obfuscate(ctx, mode: str = "1"):
     
     if file_kb > max_kb:
         await ctx.send(
-            f"❌ **File terlalu besar untuk mode {mode_name}!**\n"
-            f"📁 File kamu: {file_kb:.1f}KB\n"
-            f"📏 Max untuk mode ini: {max_kb}KB\n\n"
-            f"**Saran:** Gunakan `!obf 0` atau `!obf 1`"
+            f"❌ File {file_kb:.1f}KB terlalu besar!\n"
+            f"Max untuk {mode_name}: {max_kb}KB\n"
+            f"Coba `!obf 0` atau `!obf 1`"
         )
         return
 
-    msg = await ctx.send(f"🔄 **Processing** `{attachment.filename}`\n📦 Mode: **{mode_name}**")
+    msg = await ctx.send(f"🔄 Processing `{attachment.filename}` [{mode_name}]...")
 
     input_file = f"input_{ctx.author.id}.lua"
     output_file = f"output_{ctx.author.id}.lua"
+    final_file = f"final_{ctx.author.id}.lua"
 
     try:
         await attachment.save(input_file)
@@ -82,11 +96,22 @@ async def obfuscate(ctx, mode: str = "1"):
         )
         
         timeout = 30 if mode in ["0", "1"] else 60
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        await asyncio.wait_for(process.communicate(), timeout=timeout)
 
         if os.path.exists(output_file):
+            # Baca hasil obfuscate
+            with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # Minify: hapus whitespace berlebih
+            content = minify_lua(content)
+            
+            # Tulis hasil akhir
+            with open(final_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
             orig = os.path.getsize(input_file)
-            obf = os.path.getsize(output_file)
+            obf = os.path.getsize(final_file)
             
             await msg.delete()
             embed = discord.Embed(title="✅ Berhasil!", color=0x00ff00)
@@ -94,7 +119,7 @@ async def obfuscate(ctx, mode: str = "1"):
             embed.add_field(name="Mode", value=mode_name, inline=True)
             embed.add_field(name="Size", value=f"{orig}B → {obf}B", inline=False)
             
-            await ctx.send(embed=embed, file=discord.File(output_file, f"obf_{attachment.filename}"))
+            await ctx.send(embed=embed, file=discord.File(final_file, f"obf_{attachment.filename}"))
         else:
             await msg.edit(content="❌ Gagal! Coba mode lebih ringan.")
 
@@ -103,25 +128,20 @@ async def obfuscate(ctx, mode: str = "1"):
     except Exception as e:
         await msg.edit(content=f"❌ Error: {e}")
     finally:
-        if os.path.exists(input_file): os.remove(input_file)
-        if os.path.exists(output_file): os.remove(output_file)
+        for f in [input_file, output_file, final_file]:
+            if os.path.exists(f): os.remove(f)
 
 @bot.command(name="obfhelp")
 async def obfhelp_cmd(ctx):
     embed = discord.Embed(title="🔒 Prometheus Bot", color=0x5865F2)
     embed.add_field(
-        name="📖 Cara Pakai",
-        value="Upload file `.lua` + ketik `!obf [mode]`",
+        name="Cara Pakai",
+        value="Upload `.lua` + `!obf [0-3]`",
         inline=False
     )
     embed.add_field(
-        name="🎚️ Mode",
-        value=(
-            "`!obf 0` → Minify (max 100KB)\n"
-            "`!obf 1` → Light ⭐ (max 80KB)\n"
-            "`!obf 2` → Medium (max 50KB)\n"
-            "`!obf 3` → Strong (max 15KB)"
-        ),
+        name="Mode",
+        value="`0`=Minify `1`=Light⭐ `2`=Medium `3`=Strong",
         inline=False
     )
     await ctx.send(embed=embed)
