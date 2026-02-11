@@ -19,19 +19,49 @@ def keep_alive():
     t = Thread(target=run_web)
     t.start()
 
-def minify_lua(content):
-    """Hapus whitespace berlebih agar output 1 baris padat"""
-    # Hapus komentar single line
-    content = re.sub(r'--[^\n]*', '', content)
-    # Hapus komentar multi line
-    content = re.sub(r'--\[\[.*?\]\]', '', content, flags=re.DOTALL)
-    # Hapus newlines dan multiple spaces
-    content = re.sub(r'\s+', ' ', content)
-    # Hapus spasi setelah/sebelum karakter tertentu
-    content = re.sub(r'\s*([{}\[\]()=,;])\s*', r'\1', content)
-    # Hapus spasi di awal dan akhir
-    content = content.strip()
-    return content
+def aggressive_minify(code):
+    """Minify Lua code ke 1 baris padat"""
+    
+    # 1. Hapus komentar multi-line --[[ ]]
+    code = re.sub(r'--\[\[.*?\]\]', '', code, flags=re.DOTALL)
+    
+    # 2. Hapus komentar single-line --
+    code = re.sub(r'--[^\n]*', '', code)
+    
+    # 3. Ganti semua whitespace (newline, tab, spasi ganda) jadi 1 spasi
+    code = re.sub(r'\s+', ' ', code)
+    
+    # 4. Hapus spasi di sekitar operator dan tanda baca
+    # Sebelum dan sesudah: { } [ ] ( ) = , ; + - * / % ^ # < > ~
+    code = re.sub(r'\s*(\{)\s*', r'\1', code)
+    code = re.sub(r'\s*(\})\s*', r'\1', code)
+    code = re.sub(r'\s*(\[)\s*', r'\1', code)
+    code = re.sub(r'\s*(\])\s*', r'\1', code)
+    code = re.sub(r'\s*(\()\s*', r'\1', code)
+    code = re.sub(r'\s*(\))\s*', r'\1', code)
+    code = re.sub(r'\s*(=)\s*', r'\1', code)
+    code = re.sub(r'\s*(,)\s*', r'\1', code)
+    code = re.sub(r'\s*(;)\s*', r'\1', code)
+    code = re.sub(r'\s*(\+)\s*', r'\1', code)
+    code = re.sub(r'\s*(-)\s*', r'\1', code)
+    code = re.sub(r'\s*(\*)\s*', r'\1', code)
+    code = re.sub(r'\s*(/)\s*', r'\1', code)
+    code = re.sub(r'\s*(%)\s*', r'\1', code)
+    code = re.sub(r'\s*(\^)\s*', r'\1', code)
+    code = re.sub(r'\s*(#)\s*', r'\1', code)
+    code = re.sub(r'\s*(\.\.)\s*', r'\1', code)
+    
+    # 5. Tapi JAGA spasi antara keyword dan identifier
+    # Contoh: "local m" TIDAK boleh jadi "localm"
+    # Ini sudah aman karena kita hanya hapus spasi di sekitar simbol
+    
+    # 6. Hapus spasi di awal dan akhir
+    code = code.strip()
+    
+    # 7. Pastikan tidak ada newline tersisa
+    code = code.replace('\n', '').replace('\r', '')
+    
+    return code
 
 TOKEN = os.environ.get("DISCORD_TOKEN")
 intents = discord.Intents.default()
@@ -75,13 +105,12 @@ async def obfuscate(ctx, mode: str = "1"):
     
     if file_kb > max_kb:
         await ctx.send(
-            f"❌ File {file_kb:.1f}KB terlalu besar!\n"
-            f"Max untuk {mode_name}: {max_kb}KB\n"
+            f"❌ File {file_kb:.1f}KB > {max_kb}KB\n"
             f"Coba `!obf 0` atau `!obf 1`"
         )
         return
 
-    msg = await ctx.send(f"🔄 Processing `{attachment.filename}` [{mode_name}]...")
+    msg = await ctx.send(f"🔄 `{attachment.filename}` [{mode_name}]...")
 
     input_file = f"input_{ctx.author.id}.lua"
     output_file = f"output_{ctx.author.id}.lua"
@@ -99,12 +128,12 @@ async def obfuscate(ctx, mode: str = "1"):
         await asyncio.wait_for(process.communicate(), timeout=timeout)
 
         if os.path.exists(output_file):
-            # Baca hasil obfuscate
+            # Baca hasil
             with open(output_file, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
-            # Minify: hapus whitespace berlebih
-            content = minify_lua(content)
+            # MINIFY AGRESIF - 1 baris padat
+            content = aggressive_minify(content)
             
             # Tulis hasil akhir
             with open(final_file, 'w', encoding='utf-8') as f:
@@ -121,10 +150,10 @@ async def obfuscate(ctx, mode: str = "1"):
             
             await ctx.send(embed=embed, file=discord.File(final_file, f"obf_{attachment.filename}"))
         else:
-            await msg.edit(content="❌ Gagal! Coba mode lebih ringan.")
+            await msg.edit(content="❌ Gagal!")
 
     except asyncio.TimeoutError:
-        await msg.edit(content="❌ Timeout! Coba `!obf 0` atau `!obf 1`")
+        await msg.edit(content="❌ Timeout!")
     except Exception as e:
         await msg.edit(content=f"❌ Error: {e}")
     finally:
@@ -134,16 +163,8 @@ async def obfuscate(ctx, mode: str = "1"):
 @bot.command(name="obfhelp")
 async def obfhelp_cmd(ctx):
     embed = discord.Embed(title="🔒 Prometheus Bot", color=0x5865F2)
-    embed.add_field(
-        name="Cara Pakai",
-        value="Upload `.lua` + `!obf [0-3]`",
-        inline=False
-    )
-    embed.add_field(
-        name="Mode",
-        value="`0`=Minify `1`=Light⭐ `2`=Medium `3`=Strong",
-        inline=False
-    )
+    embed.add_field(name="Cara", value="Upload `.lua` + `!obf [0-3]`", inline=False)
+    embed.add_field(name="Mode", value="`0`Minify `1`Light⭐ `2`Medium `3`Strong", inline=False)
     await ctx.send(embed=embed)
 
 if TOKEN:
